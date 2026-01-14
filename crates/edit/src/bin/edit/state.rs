@@ -130,6 +130,7 @@ pub struct OscTitleFileStatus {
 pub struct State {
     pub menubar_color_bg: StraightRgba,
     pub menubar_color_fg: StraightRgba,
+    pub menubar_color_choice: IndexedColor,
 
     pub documents: DocumentManager,
 
@@ -160,6 +161,7 @@ pub struct State {
     pub wants_save: bool,
     pub wants_statusbar_focus: bool,
     pub wants_indentation_picker: bool,
+    pub wants_menubar_color_picker: bool,
     pub wants_go_to_file: bool,
     pub wants_about: bool,
     pub wants_close: bool,
@@ -176,9 +178,12 @@ pub struct State {
 
 impl State {
     pub fn new() -> apperr::Result<Self> {
+        let saved_color = load_menubar_color();
+        
         Ok(Self {
             menubar_color_bg: StraightRgba::zero(),
             menubar_color_fg: StraightRgba::zero(),
+            menubar_color_choice: saved_color,
 
             documents: Default::default(),
 
@@ -208,6 +213,7 @@ impl State {
             wants_statusbar_focus: false,
             wants_encoding_change: StateEncodingChange::None,
             wants_indentation_picker: false,
+            wants_menubar_color_picker: false,
             wants_go_to_file: false,
             wants_about: false,
             wants_close: false,
@@ -271,5 +277,70 @@ pub fn draw_error_log(ctx: &mut Context, state: &mut State) {
     }
     if ctx.modal_end() {
         state.error_log_count = 0;
+    }
+}
+
+fn get_config_path() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("APPDATA")
+            .map(|appdata| PathBuf::from(appdata).join("edit").join("config.txt"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+            Some(PathBuf::from(xdg_config).join("edit").join("config.txt"))
+        } else {
+            std::env::var_os("HOME")
+                .map(|home| PathBuf::from(home).join(".config").join("edit").join("config.txt"))
+        }
+    }
+}
+
+pub fn load_menubar_color() -> IndexedColor {
+    if let Some(config_path) = get_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            for line in content.lines() {
+                if let Some(value) = line.strip_prefix("menubar_color=") {
+                    return match value.trim() {
+                        "BrightRed" => IndexedColor::BrightRed,
+                        "BrightGreen" => IndexedColor::BrightGreen,
+                        "BrightYellow" => IndexedColor::BrightYellow,
+                        "BrightMagenta" => IndexedColor::BrightMagenta,
+                        "BrightCyan" => IndexedColor::BrightCyan,
+                        _ => IndexedColor::BrightBlue,
+                    };
+                }
+            }
+        }
+    }
+    IndexedColor::BrightBlue // Default
+}
+
+pub fn save_menubar_color(color: IndexedColor) {
+    if let Some(config_path) = get_config_path() {
+        // Try to create parent directory if it doesn't exist
+        if let Some(parent) = config_path.parent() {
+            if !parent.exists() {
+                if let Err(_) = std::fs::create_dir_all(parent) {
+                    // Failed to create config directory, cannot save
+                    return;
+                }
+            }
+        }
+        
+        let color_name = match color {
+            IndexedColor::BrightBlue => "BrightBlue",
+            IndexedColor::BrightRed => "BrightRed",
+            IndexedColor::BrightGreen => "BrightGreen",
+            IndexedColor::BrightYellow => "BrightYellow",
+            IndexedColor::BrightMagenta => "BrightMagenta",
+            IndexedColor::BrightCyan => "BrightCyan",
+            _ => "BrightBlue",
+        };
+        
+        let config_content = format!("menubar_color={}\n", color_name);
+        // Attempt to write config; if it fails, the color just won't persist
+        let _ = std::fs::write(&config_path, config_content);
     }
 }

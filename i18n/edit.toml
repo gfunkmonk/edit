@@ -1932,3 +1932,27 @@ uk = "Файл вже існує. Перезаписати?"
 vi = "Tệp đã tồn tại. Bạn có muốn ghi đè không?"
 zh_hans = "文件已存在。要覆盖它吗？"
 zh_hant = "檔案已存在。要覆蓋它嗎？"
+
+[ViewMenubarColor]
+en = "Menubar Color…"
+
+[ViewMenubarColorBlue]
+en = "Blue"
+
+[ViewMenubarColorRed]
+en = "Red"
+
+[ViewMenubarColorGreen]
+en = "Green"
+
+[ViewMenubarColorYellow]
+en = "Yellow"
+
+[ViewMenubarColorMagenta]
+en = "Magenta"
+
+[ViewMenubarColorCyan]
+en = "Cyan"
+
+[Close]
+en = "Close"

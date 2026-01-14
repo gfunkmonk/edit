@@ -83,7 +83,7 @@ fn run() -> apperr::Result<()> {
     let _restore = setup_terminal(&mut tui, &mut state, &mut vt_parser);
 
     state.menubar_color_bg = tui.indexed(IndexedColor::Background).oklab_blend(tui.indexed_alpha(
-        IndexedColor::BrightBlue,
+        state.menubar_color_choice,
         1,
         2,
     ));
@@ -329,6 +329,9 @@ fn draw(ctx: &mut Context, state: &mut State) {
     }
     if state.wants_about {
         draw_dialog_about(ctx, state);
+    }
+    if state.wants_menubar_color_picker {
+        draw_menubar_color_picker(ctx, state);
     }
     if ctx.clipboard_ref().wants_host_sync() {
         draw_handle_clipboard_change(ctx, state);

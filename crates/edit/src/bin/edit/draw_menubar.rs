@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use edit::framebuffer::IndexedColor;
 use edit::helpers::*;
 use edit::input::{kbmod, vk};
 use edit::tui::*;
@@ -123,7 +124,74 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
         }
     }
 
+    // Menubar color customization (available without active document)
+    if ctx.menubar_menu_button(loc(LocId::ViewMenubarColor), 'M', vk::NULL) {
+        state.wants_menubar_color_picker = true;
+    }
+
     ctx.menubar_menu_end();
+}
+
+fn draw_menubar_color_options(ctx: &mut Context, state: &mut State) {
+    ctx.modal_begin("menubar-color-picker", loc(LocId::ViewMenubarColor));
+    {
+        ctx.block_begin("content");
+        ctx.inherit_focus();
+        ctx.attr_padding(Rect::three(1, 2, 1));
+        {
+            const COLORS: [(LocId, &str, char, IndexedColor); 6] = [
+                (LocId::ViewMenubarColorBlue, "blue", 'B', IndexedColor::BrightBlue),
+                (LocId::ViewMenubarColorRed, "red", 'R', IndexedColor::BrightRed),
+                (LocId::ViewMenubarColorGreen, "green", 'G', IndexedColor::BrightGreen),
+                (LocId::ViewMenubarColorYellow, "yellow", 'Y', IndexedColor::BrightYellow),
+                (LocId::ViewMenubarColorMagenta, "magenta", 'M', IndexedColor::BrightMagenta),
+                (LocId::ViewMenubarColorCyan, "cyan", 'C', IndexedColor::BrightCyan),
+            ];
+
+            for (loc_id, button_id, accelerator, color) in COLORS {
+                if ctx.button(
+                    button_id,
+                    loc(loc_id),
+                    ButtonStyle::default().accelerator(accelerator),
+                ) {
+                    state.menubar_color_choice = color;
+                    update_menubar_color(ctx, state);
+                    state.wants_menubar_color_picker = false;
+                }
+            }
+
+            ctx.block_begin("buttons");
+            ctx.inherit_focus();
+            ctx.attr_padding(Rect::three(1, 2, 0));
+            ctx.attr_position(Position::Center);
+            {
+                if ctx.button("close", loc(LocId::Close), ButtonStyle::default()) {
+                    state.wants_menubar_color_picker = false;
+                }
+                ctx.inherit_focus();
+            }
+            ctx.block_end();
+        }
+        ctx.block_end();
+    }
+    if ctx.modal_end() {
+        state.wants_menubar_color_picker = false;
+    }
+}
+
+pub fn draw_menubar_color_picker(ctx: &mut Context, state: &mut State) {
+    draw_menubar_color_options(ctx, state);
+}
+
+fn update_menubar_color(ctx: &mut Context, state: &mut State) {
+    // Save immediately when color changes
+    crate::state::save_menubar_color(state.menubar_color_choice);
+    
+    state.menubar_color_bg = ctx.indexed(IndexedColor::Background).oklab_blend(
+        ctx.indexed_alpha(state.menubar_color_choice, 1, 2),
+    );
+    state.menubar_color_fg = ctx.contrasted(state.menubar_color_bg);
+    ctx.needs_rerender();
 }
 
 fn draw_menu_help(ctx: &mut Context, state: &mut State) {
