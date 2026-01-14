@@ -132,6 +132,9 @@ pub struct State {
     pub menubar_color_fg: StraightRgba,
     pub menubar_color_choice: IndexedColor,
 
+    pub highlight_color_rgba: StraightRgba,
+    pub highlight_color_choice: IndexedColor,
+
     pub documents: DocumentManager,
 
     // A ring buffer of the last 10 errors.
@@ -162,6 +165,7 @@ pub struct State {
     pub wants_statusbar_focus: bool,
     pub wants_indentation_picker: bool,
     pub wants_menubar_color_picker: bool,
+    pub wants_highlight_color_picker: bool,
     pub wants_go_to_file: bool,
     pub wants_about: bool,
     pub wants_close: bool,
@@ -179,11 +183,15 @@ pub struct State {
 impl State {
     pub fn new() -> apperr::Result<Self> {
         let saved_color = load_menubar_color();
+        let saved_highlight_color = load_highlight_color();
         
         Ok(Self {
             menubar_color_bg: StraightRgba::zero(),
             menubar_color_fg: StraightRgba::zero(),
             menubar_color_choice: saved_color,
+
+            highlight_color_rgba: StraightRgba::zero(),
+            highlight_color_choice: saved_highlight_color,
 
             documents: Default::default(),
 
@@ -214,6 +222,7 @@ impl State {
             wants_encoding_change: StateEncodingChange::None,
             wants_indentation_picker: false,
             wants_menubar_color_picker: false,
+            wants_highlight_color_picker: false,
             wants_go_to_file: false,
             wants_about: false,
             wants_close: false,
@@ -233,6 +242,12 @@ impl State {
 pub fn draw_add_untitled_document(ctx: &mut Context, state: &mut State) {
     if let Err(err) = state.documents.add_untitled() {
         error_log_add(ctx, state, err);
+    } else {
+        // Set highlight color on the newly created document
+        if let Some(doc) = state.documents.active() {
+            let mut tb = doc.buffer.borrow_mut();
+            tb.set_line_highlight_color(state.highlight_color_rgba);
+        }
     }
 }
 
@@ -317,7 +332,35 @@ pub fn load_menubar_color() -> IndexedColor {
     IndexedColor::BrightBlue // Default
 }
 
+pub fn load_highlight_color() -> IndexedColor {
+    if let Some(config_path) = get_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            for line in content.lines() {
+                if let Some(value) = line.strip_prefix("highlight_color=") {
+                    return match value.trim() {
+                        "BrightRed" => IndexedColor::BrightRed,
+                        "BrightGreen" => IndexedColor::BrightGreen,
+                        "BrightYellow" => IndexedColor::BrightYellow,
+                        "BrightMagenta" => IndexedColor::BrightMagenta,
+                        "BrightCyan" => IndexedColor::BrightCyan,
+                        _ => IndexedColor::BrightBlue,
+                    };
+                }
+            }
+        }
+    }
+    IndexedColor::BrightBlue // Default
+}
+
 pub fn save_menubar_color(color: IndexedColor) {
+    save_config("menubar_color", color);
+}
+
+pub fn save_highlight_color(color: IndexedColor) {
+    save_config("highlight_color", color);
+}
+
+fn save_config(key: &str, color: IndexedColor) {
     if let Some(config_path) = get_config_path() {
         // Try to create parent directory if it doesn't exist
         if let Some(parent) = config_path.parent() {
@@ -339,7 +382,25 @@ pub fn save_menubar_color(color: IndexedColor) {
             _ => "BrightBlue",
         };
         
-        let config_content = format!("menubar_color={}\n", color_name);
+        // Read existing config
+        let mut config_lines = std::collections::HashMap::new();
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            for line in content.lines() {
+                if let Some((k, v)) = line.split_once('=') {
+                    config_lines.insert(k.to_string(), v.to_string());
+                }
+            }
+        }
+        
+        // Update the specific key
+        config_lines.insert(key.to_string(), color_name.to_string());
+        
+        // Write back
+        let mut config_content = String::new();
+        for (k, v) in config_lines {
+            config_content.push_str(&format!("{}={}\n", k, v));
+        }
+        
         // Attempt to write config; if it fails, the color just won't persist
         let _ = std::fs::write(&config_path, config_content);
     }

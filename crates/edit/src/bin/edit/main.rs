@@ -88,6 +88,16 @@ fn run() -> apperr::Result<()> {
         2,
     ));
     state.menubar_color_fg = tui.contrasted(state.menubar_color_bg);
+    
+    // Initialize highlight color
+    state.highlight_color_rgba = tui.indexed_alpha(state.highlight_color_choice, 1, 2);
+    
+    // Apply highlight color to all existing documents
+    for doc in &state.documents.list {
+        let mut tb = doc.buffer.borrow_mut();
+        tb.set_line_highlight_color(state.highlight_color_rgba);
+    }
+    
     let floater_bg = tui
         .indexed_alpha(IndexedColor::Background, 2, 3)
         .oklab_blend(tui.indexed_alpha(IndexedColor::Foreground, 1, 3));
@@ -332,6 +342,9 @@ fn draw(ctx: &mut Context, state: &mut State) {
     }
     if state.wants_menubar_color_picker {
         draw_menubar_color_picker(ctx, state);
+    }
+    if state.wants_highlight_color_picker {
+        draw_highlight_color_picker(ctx, state);
     }
     if ctx.clipboard_ref().wants_host_sync() {
         draw_handle_clipboard_change(ctx, state);

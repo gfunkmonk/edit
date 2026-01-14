@@ -241,7 +241,11 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
 
     if let Some(path) = doit {
         let res = if state.wants_file_picker == StateFilePicker::Open {
-            state.documents.add_file_path(&path).map(|_| ())
+            state.documents.add_file_path(&path).map(|doc| {
+                // Set highlight color on newly opened document
+                let mut tb = doc.buffer.borrow_mut();
+                tb.set_line_highlight_color(state.highlight_color_rgba);
+            })
         } else if let Some(doc) = state.documents.active_mut() {
             doc.save(Some(path))
         } else {

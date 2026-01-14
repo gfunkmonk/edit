@@ -129,6 +129,11 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
         state.wants_menubar_color_picker = true;
     }
 
+    // Highlight color customization (available without active document)
+    if ctx.menubar_menu_button(loc(LocId::ViewHighlightColor), 'L', vk::NULL) {
+        state.wants_highlight_color_picker = true;
+    }
+
     ctx.menubar_menu_end();
 }
 
@@ -200,6 +205,82 @@ fn update_menubar_color(ctx: &mut Context, state: &mut State) {
         ctx.indexed_alpha(state.menubar_color_choice, 1, 2),
     );
     state.menubar_color_fg = ctx.contrasted(state.menubar_color_bg);
+    ctx.needs_rerender();
+}
+
+fn draw_highlight_color_options(ctx: &mut Context, state: &mut State) {
+    ctx.modal_begin("highlight-color-picker", loc(LocId::ViewHighlightColor));
+    {
+        ctx.block_begin("content");
+        ctx.inherit_focus();
+        ctx.attr_padding(Rect::three(1, 2, 1));
+        {
+            const COLORS: [(LocId, IndexedColor, InputKey); 6] = [
+                (LocId::ViewHighlightColorBlue, IndexedColor::BrightBlue, vk::B),
+                (LocId::ViewHighlightColorRed, IndexedColor::BrightRed, vk::R),
+                (LocId::ViewHighlightColorGreen, IndexedColor::BrightGreen, vk::G),
+                (LocId::ViewHighlightColorYellow, IndexedColor::BrightYellow, vk::Y),
+                (LocId::ViewHighlightColorMagenta, IndexedColor::BrightMagenta, vk::M),
+                (LocId::ViewHighlightColorCyan, IndexedColor::BrightCyan, vk::C),
+            ];
+
+            ctx.list_begin("colors");
+            ctx.inherit_focus();
+            {
+                for (loc_id, color, shortcut) in COLORS {
+                    let is_selected = state.highlight_color_choice == color;
+                    let text = loc(loc_id);
+                    
+                    // Check for keyboard shortcut
+                    let shortcut_pressed = ctx.consume_shortcut(shortcut);
+                    
+                    let selection = ctx.list_item(is_selected, text);
+                    
+                    if selection == ListSelection::Activated || shortcut_pressed {
+                        state.highlight_color_choice = color;
+                        update_highlight_color(ctx, state);
+                        state.wants_highlight_color_picker = false;
+                    }
+                }
+            }
+            ctx.list_end();
+
+            ctx.block_begin("buttons");
+            ctx.inherit_focus();
+            ctx.attr_padding(Rect::three(1, 2, 0));
+            ctx.attr_position(Position::Center);
+            {
+                if ctx.button("close", loc(LocId::Close), ButtonStyle::default()) {
+                    state.wants_highlight_color_picker = false;
+                }
+                ctx.inherit_focus();
+            }
+            ctx.block_end();
+        }
+        ctx.block_end();
+    }
+    if ctx.modal_end() {
+        state.wants_highlight_color_picker = false;
+    }
+}
+
+pub fn draw_highlight_color_picker(ctx: &mut Context, state: &mut State) {
+    draw_highlight_color_options(ctx, state);
+}
+
+fn update_highlight_color(ctx: &mut Context, state: &mut State) {
+    // Save immediately when color changes
+    crate::state::save_highlight_color(state.highlight_color_choice);
+    
+    // Create the highlight color with semi-transparency (alpha = 0x7f for 50% opacity)
+    state.highlight_color_rgba = ctx.indexed_alpha(state.highlight_color_choice, 1, 2);
+    
+    // Update all existing document buffers with the new highlight color
+    for doc in &state.documents.list {
+        let mut tb = doc.buffer.borrow_mut();
+        tb.set_line_highlight_color(state.highlight_color_rgba);
+    }
+    
     ctx.needs_rerender();
 }
 
