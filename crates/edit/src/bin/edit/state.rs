@@ -288,9 +288,12 @@ fn get_config_path() -> Option<PathBuf> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
-            .map(|home| PathBuf::from(home).join(".config").join("edit").join("config.txt"))
+        if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+            Some(PathBuf::from(xdg_config).join("edit").join("config.txt"))
+        } else {
+            std::env::var_os("HOME")
+                .map(|home| PathBuf::from(home).join(".config").join("edit").join("config.txt"))
+        }
     }
 }
 
@@ -316,8 +319,14 @@ pub fn load_menubar_color() -> IndexedColor {
 
 pub fn save_menubar_color(color: IndexedColor) {
     if let Some(config_path) = get_config_path() {
+        // Try to create parent directory if it doesn't exist
         if let Some(parent) = config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if !parent.exists() {
+                if let Err(_) = std::fs::create_dir_all(parent) {
+                    // Failed to create config directory, cannot save
+                    return;
+                }
+            }
         }
         
         let color_name = match color {
@@ -331,6 +340,7 @@ pub fn save_menubar_color(color: IndexedColor) {
         };
         
         let config_content = format!("menubar_color={}\n", color_name);
+        // Attempt to write config; if it fails, the color just won't persist
         let _ = std::fs::write(&config_path, config_content);
     }
 }
