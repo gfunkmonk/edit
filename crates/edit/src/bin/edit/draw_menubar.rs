@@ -123,7 +123,77 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
         }
     }
 
+    // Menubar color customization (available without active document)
+    draw_menubar_color_options(ctx, state);
+
     ctx.menubar_menu_end();
+}
+
+fn draw_menubar_color_options(ctx: &mut Context, state: &mut State) {
+    use edit::framebuffer::IndexedColor;
+
+    if ctx.menubar_menu_checkbox(
+        loc(LocId::ViewMenubarColorBlue),
+        'B',
+        vk::NULL,
+        state.menubar_color_choice == IndexedColor::BrightBlue,
+    ) {
+        state.menubar_color_choice = IndexedColor::BrightBlue;
+        update_menubar_color(ctx, state);
+    }
+    if ctx.menubar_menu_checkbox(
+        loc(LocId::ViewMenubarColorRed),
+        'R',
+        vk::NULL,
+        state.menubar_color_choice == IndexedColor::BrightRed,
+    ) {
+        state.menubar_color_choice = IndexedColor::BrightRed;
+        update_menubar_color(ctx, state);
+    }
+    if ctx.menubar_menu_checkbox(
+        loc(LocId::ViewMenubarColorGreen),
+        'G',
+        vk::NULL,
+        state.menubar_color_choice == IndexedColor::BrightGreen,
+    ) {
+        state.menubar_color_choice = IndexedColor::BrightGreen;
+        update_menubar_color(ctx, state);
+    }
+    if ctx.menubar_menu_checkbox(
+        loc(LocId::ViewMenubarColorYellow),
+        'Y',
+        vk::NULL,
+        state.menubar_color_choice == IndexedColor::BrightYellow,
+    ) {
+        state.menubar_color_choice = IndexedColor::BrightYellow;
+        update_menubar_color(ctx, state);
+    }
+    if ctx.menubar_menu_checkbox(
+        loc(LocId::ViewMenubarColorMagenta),
+        'M',
+        vk::NULL,
+        state.menubar_color_choice == IndexedColor::BrightMagenta,
+    ) {
+        state.menubar_color_choice = IndexedColor::BrightMagenta;
+        update_menubar_color(ctx, state);
+    }
+    if ctx.menubar_menu_checkbox(
+        loc(LocId::ViewMenubarColorCyan),
+        'C',
+        vk::NULL,
+        state.menubar_color_choice == IndexedColor::BrightCyan,
+    ) {
+        state.menubar_color_choice = IndexedColor::BrightCyan;
+        update_menubar_color(ctx, state);
+    }
+}
+
+fn update_menubar_color(ctx: &mut Context, state: &mut State) {
+    state.menubar_color_bg = ctx.indexed(edit::framebuffer::IndexedColor::Background).oklab_blend(
+        ctx.indexed_alpha(state.menubar_color_choice, 1, 2),
+    );
+    state.menubar_color_fg = ctx.contrasted(state.menubar_color_bg);
+    ctx.needs_rerender();
 }
 
 fn draw_menu_help(ctx: &mut Context, state: &mut State) {
