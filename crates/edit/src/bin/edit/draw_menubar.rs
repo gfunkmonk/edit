@@ -281,6 +281,12 @@ fn update_highlight_color(ctx: &mut Context, state: &mut State) {
         tb.set_line_highlight_color(state.highlight_color_rgba);
     }
     
+    // Update selection colors for UI elements
+    let selection_bg = ctx.indexed(state.highlight_color_choice);
+    let selection_fg = ctx.contrasted(selection_bg);
+    ctx.set_selection_bg(selection_bg);
+    ctx.set_selection_fg(selection_fg);
+    
     ctx.needs_rerender();
 }
 

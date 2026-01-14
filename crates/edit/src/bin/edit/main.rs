@@ -98,6 +98,12 @@ fn run() -> apperr::Result<()> {
         tb.set_line_highlight_color(state.highlight_color_rgba);
     }
     
+    // Initialize selection colors based on highlight color choice
+    let selection_bg = tui.indexed(state.highlight_color_choice);
+    let selection_fg = tui.contrasted(selection_bg);
+    tui.set_selection_bg(selection_bg);
+    tui.set_selection_fg(selection_fg);
+    
     let floater_bg = tui
         .indexed_alpha(IndexedColor::Background, 2, 3)
         .oklab_blend(tui.indexed_alpha(IndexedColor::Foreground, 1, 3));

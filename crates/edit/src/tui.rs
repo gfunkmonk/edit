@@ -322,6 +322,8 @@ pub struct Tui {
     floater_default_fg: StraightRgba,
     modal_default_bg: StraightRgba,
     modal_default_fg: StraightRgba,
+    selection_bg: StraightRgba,
+    selection_fg: StraightRgba,
 
     /// Last known terminal size.
     ///
@@ -398,6 +400,8 @@ impl Tui {
             floater_default_fg: StraightRgba::zero(),
             modal_default_bg: StraightRgba::zero(),
             modal_default_fg: StraightRgba::zero(),
+            selection_bg: StraightRgba::zero(),
+            selection_fg: StraightRgba::zero(),
 
             size: Size { width: 0, height: 0 },
             mouse_position: Point::MIN,
@@ -455,6 +459,16 @@ impl Tui {
     /// Set the default foreground color for modals.
     pub fn set_modal_default_fg(&mut self, color: StraightRgba) {
         self.modal_default_fg = color;
+    }
+
+    /// Set the background color for selected UI elements.
+    pub fn set_selection_bg(&mut self, color: StraightRgba) {
+        self.selection_bg = color;
+    }
+
+    /// Set the foreground color for selected UI elements.
+    pub fn set_selection_fg(&mut self, color: StraightRgba) {
+        self.selection_fg = color;
     }
 
     /// If the TUI is currently running animations, etc.,
@@ -1400,6 +1414,16 @@ impl<'a> Context<'a, '_> {
     /// Returns the clipboard (mutable).
     pub fn clipboard_mut(&mut self) -> &mut Clipboard {
         &mut self.tui.clipboard
+    }
+
+    /// Set the background color for selected UI elements.
+    pub fn set_selection_bg(&mut self, color: StraightRgba) {
+        self.tui.selection_bg = color;
+    }
+
+    /// Set the foreground color for selected UI elements.
+    pub fn set_selection_fg(&mut self, color: StraightRgba) {
+        self.tui.selection_fg = color;
     }
 
     /// Tell the UI framework that your state changed and you need another layout pass.
@@ -3102,8 +3126,8 @@ impl<'a> Context<'a, '_> {
         if contains_focus {
             {
                 let mut node = selected_next.borrow_mut();
-                node.attributes.bg = self.indexed(IndexedColor::Green);
-                node.attributes.fg = self.contrasted(self.indexed(IndexedColor::Green));
+                node.attributes.bg = self.tui.selection_bg;
+                node.attributes.fg = self.tui.selection_fg;
             }
             self.steal_focus_for(selected_next);
         }
@@ -3142,8 +3166,8 @@ impl<'a> Context<'a, '_> {
             self.attr_foreground_rgba(self.tui.floater_default_fg);
 
             if self.is_focused() {
-                self.attr_background_rgba(self.indexed(IndexedColor::Green));
-                self.attr_foreground_rgba(self.contrasted(self.indexed(IndexedColor::Green)));
+                self.attr_background_rgba(self.tui.selection_bg);
+                self.attr_foreground_rgba(self.tui.selection_fg);
             }
 
             self.next_block_id_mixin(mixin);
@@ -3196,8 +3220,8 @@ impl<'a> Context<'a, '_> {
         }
 
         if self.is_focused() {
-            self.attr_background_rgba(self.indexed(IndexedColor::Green));
-            self.attr_foreground_rgba(self.contrasted(self.indexed(IndexedColor::Green)));
+            self.attr_background_rgba(self.tui.selection_bg);
+            self.attr_foreground_rgba(self.tui.selection_fg);
         }
 
         let clicked =
