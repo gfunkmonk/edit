@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use edit::framebuffer::IndexedColor;
 use edit::helpers::*;
 use edit::input::{kbmod, vk};
 use edit::tui::*;
@@ -130,66 +131,30 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menubar_color_options(ctx: &mut Context, state: &mut State) {
-    use edit::framebuffer::IndexedColor;
+    const COLORS: [(LocId, char, IndexedColor); 6] = [
+        (LocId::ViewMenubarColorBlue, 'B', IndexedColor::BrightBlue),
+        (LocId::ViewMenubarColorRed, 'R', IndexedColor::BrightRed),
+        (LocId::ViewMenubarColorGreen, 'G', IndexedColor::BrightGreen),
+        (LocId::ViewMenubarColorYellow, 'Y', IndexedColor::BrightYellow),
+        (LocId::ViewMenubarColorMagenta, 'M', IndexedColor::BrightMagenta),
+        (LocId::ViewMenubarColorCyan, 'C', IndexedColor::BrightCyan),
+    ];
 
-    if ctx.menubar_menu_checkbox(
-        loc(LocId::ViewMenubarColorBlue),
-        'B',
-        vk::NULL,
-        state.menubar_color_choice == IndexedColor::BrightBlue,
-    ) {
-        state.menubar_color_choice = IndexedColor::BrightBlue;
-        update_menubar_color(ctx, state);
-    }
-    if ctx.menubar_menu_checkbox(
-        loc(LocId::ViewMenubarColorRed),
-        'R',
-        vk::NULL,
-        state.menubar_color_choice == IndexedColor::BrightRed,
-    ) {
-        state.menubar_color_choice = IndexedColor::BrightRed;
-        update_menubar_color(ctx, state);
-    }
-    if ctx.menubar_menu_checkbox(
-        loc(LocId::ViewMenubarColorGreen),
-        'G',
-        vk::NULL,
-        state.menubar_color_choice == IndexedColor::BrightGreen,
-    ) {
-        state.menubar_color_choice = IndexedColor::BrightGreen;
-        update_menubar_color(ctx, state);
-    }
-    if ctx.menubar_menu_checkbox(
-        loc(LocId::ViewMenubarColorYellow),
-        'Y',
-        vk::NULL,
-        state.menubar_color_choice == IndexedColor::BrightYellow,
-    ) {
-        state.menubar_color_choice = IndexedColor::BrightYellow;
-        update_menubar_color(ctx, state);
-    }
-    if ctx.menubar_menu_checkbox(
-        loc(LocId::ViewMenubarColorMagenta),
-        'M',
-        vk::NULL,
-        state.menubar_color_choice == IndexedColor::BrightMagenta,
-    ) {
-        state.menubar_color_choice = IndexedColor::BrightMagenta;
-        update_menubar_color(ctx, state);
-    }
-    if ctx.menubar_menu_checkbox(
-        loc(LocId::ViewMenubarColorCyan),
-        'C',
-        vk::NULL,
-        state.menubar_color_choice == IndexedColor::BrightCyan,
-    ) {
-        state.menubar_color_choice = IndexedColor::BrightCyan;
-        update_menubar_color(ctx, state);
+    for (loc_id, accelerator, color) in COLORS {
+        if ctx.menubar_menu_checkbox(
+            loc(loc_id),
+            accelerator,
+            vk::NULL,
+            state.menubar_color_choice == color,
+        ) {
+            state.menubar_color_choice = color;
+            update_menubar_color(ctx, state);
+        }
     }
 }
 
 fn update_menubar_color(ctx: &mut Context, state: &mut State) {
-    state.menubar_color_bg = ctx.indexed(edit::framebuffer::IndexedColor::Background).oklab_blend(
+    state.menubar_color_bg = ctx.indexed(IndexedColor::Background).oklab_blend(
         ctx.indexed_alpha(state.menubar_color_choice, 1, 2),
     );
     state.menubar_color_fg = ctx.contrasted(state.menubar_color_bg);
