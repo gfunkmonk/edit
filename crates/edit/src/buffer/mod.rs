@@ -238,6 +238,7 @@ pub struct TextBuffer {
     tab_size: CoordType,
     indent_with_tabs: bool,
     line_highlight_enabled: bool,
+    line_highlight_color: StraightRgba,
     ruler: CoordType,
     encoding: &'static str,
     newlines_are_crlf: bool,
@@ -286,6 +287,7 @@ impl TextBuffer {
             tab_size: 4,
             indent_with_tabs: false,
             line_highlight_enabled: false,
+            line_highlight_color: StraightRgba::from_le(0x7f7f7f7f),
             ruler: 0,
             encoding: "UTF-8",
             newlines_are_crlf: cfg!(windows), // Windows users want CRLF
@@ -576,6 +578,11 @@ impl TextBuffer {
     /// Sets whether the line the cursor is on should be highlighted.
     pub fn set_line_highlight_enabled(&mut self, enabled: bool) {
         self.line_highlight_enabled = enabled;
+    }
+
+    /// Sets the color used to highlight the line the cursor is on.
+    pub fn set_line_highlight_color(&mut self, color: StraightRgba) {
+        self.line_highlight_color = color;
     }
 
     /// Sets a ruler column, e.g. 80.
@@ -2024,7 +2031,7 @@ impl TextBuffer {
                             right: destination.right,
                             bottom: cursor.y + 1,
                         },
-                        StraightRgba::from_le(0x7f7f7f7f),
+                        self.line_highlight_color,
                     );
                 }
             }

@@ -1954,5 +1954,26 @@ en = "Magenta"
 [ViewMenubarColorCyan]
 en = "Cyan"
 
+[ViewHighlightColor]
+en = "Highlight Color…"
+
+[ViewHighlightColorBlue]
+en = "Blue"
+
+[ViewHighlightColorRed]
+en = "Red"
+
+[ViewHighlightColorGreen]
+en = "Green"
+
+[ViewHighlightColorYellow]
+en = "Yellow"
+
+[ViewHighlightColorMagenta]
+en = "Magenta"
+
+[ViewHighlightColorCyan]
+en = "Cyan"
+
 [Close]
 en = "Close"

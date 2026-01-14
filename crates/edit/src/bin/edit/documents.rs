@@ -75,7 +75,7 @@ impl Document {
 
 #[derive(Default)]
 pub struct DocumentManager {
-    list: LinkedList<Document>,
+    pub list: LinkedList<Document>,
 }
 
 impl DocumentManager {
