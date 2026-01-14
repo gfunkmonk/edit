@@ -3,7 +3,7 @@
 
 use edit::framebuffer::IndexedColor;
 use edit::helpers::*;
-use edit::input::{kbmod, vk};
+use edit::input::{kbmod, vk, InputKey};
 use edit::tui::*;
 use stdext::arena_format;
 
@@ -20,7 +20,7 @@ pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
         if ctx.menubar_menu_begin(loc(LocId::File), 'F') {
             draw_menu_file(ctx, state);
         }
-        if !contains_focus && ctx.consume_shortcut(vk::F10) {
+        if !contains_focus && (ctx.consume_shortcut(vk::F10) || ctx.consume_shortcut(kbmod::ALT | vk::DOWN)) {
             ctx.steal_focus();
         }
         if state.documents.active().is_some() {
@@ -139,26 +139,35 @@ fn draw_menubar_color_options(ctx: &mut Context, state: &mut State) {
         ctx.inherit_focus();
         ctx.attr_padding(Rect::three(1, 2, 1));
         {
-            const COLORS: [(LocId, &str, char, IndexedColor); 6] = [
-                (LocId::ViewMenubarColorBlue, "blue", 'B', IndexedColor::BrightBlue),
-                (LocId::ViewMenubarColorRed, "red", 'R', IndexedColor::BrightRed),
-                (LocId::ViewMenubarColorGreen, "green", 'G', IndexedColor::BrightGreen),
-                (LocId::ViewMenubarColorYellow, "yellow", 'Y', IndexedColor::BrightYellow),
-                (LocId::ViewMenubarColorMagenta, "magenta", 'M', IndexedColor::BrightMagenta),
-                (LocId::ViewMenubarColorCyan, "cyan", 'C', IndexedColor::BrightCyan),
+            const COLORS: [(LocId, IndexedColor, InputKey); 6] = [
+                (LocId::ViewMenubarColorBlue, IndexedColor::BrightBlue, vk::B),
+                (LocId::ViewMenubarColorRed, IndexedColor::BrightRed, vk::R),
+                (LocId::ViewMenubarColorGreen, IndexedColor::BrightGreen, vk::G),
+                (LocId::ViewMenubarColorYellow, IndexedColor::BrightYellow, vk::Y),
+                (LocId::ViewMenubarColorMagenta, IndexedColor::BrightMagenta, vk::M),
+                (LocId::ViewMenubarColorCyan, IndexedColor::BrightCyan, vk::C),
             ];
 
-            for (loc_id, button_id, accelerator, color) in COLORS {
-                if ctx.button(
-                    button_id,
-                    loc(loc_id),
-                    ButtonStyle::default().accelerator(accelerator),
-                ) {
-                    state.menubar_color_choice = color;
-                    update_menubar_color(ctx, state);
-                    state.wants_menubar_color_picker = false;
+            ctx.list_begin("colors");
+            ctx.inherit_focus();
+            {
+                for (loc_id, color, shortcut) in COLORS {
+                    let is_selected = state.menubar_color_choice == color;
+                    let text = loc(loc_id);
+                    
+                    // Check for keyboard shortcut
+                    let shortcut_pressed = ctx.consume_shortcut(shortcut);
+                    
+                    let selection = ctx.list_item(is_selected, text);
+                    
+                    if selection == ListSelection::Activated || shortcut_pressed {
+                        state.menubar_color_choice = color;
+                        update_menubar_color(ctx, state);
+                        state.wants_menubar_color_picker = false;
+                    }
                 }
             }
+            ctx.list_end();
 
             ctx.block_begin("buttons");
             ctx.inherit_focus();
