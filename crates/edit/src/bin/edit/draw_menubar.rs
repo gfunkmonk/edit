@@ -184,6 +184,9 @@ pub fn draw_menubar_color_picker(ctx: &mut Context, state: &mut State) {
 }
 
 fn update_menubar_color(ctx: &mut Context, state: &mut State) {
+    // Save immediately when color changes
+    crate::state::save_menubar_color(state.menubar_color_choice);
+    
     state.menubar_color_bg = ctx.indexed(IndexedColor::Background).oklab_blend(
         ctx.indexed_alpha(state.menubar_color_choice, 1, 2),
     );
