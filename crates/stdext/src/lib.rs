@@ -3,10 +3,12 @@
 
 //! Arena allocators. Small and fast.
 
-#![feature(allocator_api)]
-
+pub mod alloc;
 pub mod arena;
-pub mod sys;
-
+pub mod collections;
 mod helpers;
+pub mod simd;
+pub mod sys;
+pub mod unicode;
+
 pub use helpers::*;

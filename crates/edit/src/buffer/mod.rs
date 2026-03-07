@@ -25,17 +25,19 @@ mod navigation;
 
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
-use std::collections::LinkedList;
-use std::fmt::Write as _;
+use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{Read as _, Write as _};
+use std::io::{self, Read as _, Write as _};
 use std::mem::{self, MaybeUninit};
 use std::ops::Range;
 use std::rc::Rc;
 use std::str;
 
 pub use gap_buffer::GapBuffer;
-use stdext::arena::{Arena, ArenaString, scratch_arena};
+use stdext::arena::{Arena, scratch_arena};
+use stdext::collections::{BString, BVec};
+use stdext::unicode::Utf8Chars;
+use stdext::{ReplaceRange as _, arena_write_fmt, minmax, slice_as_uninit_mut, slice_copy_safe};
 
 use crate::cell::SemiRefCell;
 use crate::clipboard::Clipboard;
@@ -44,8 +46,8 @@ use crate::framebuffer::{Framebuffer, IndexedColor};
 use crate::helpers::*;
 use crate::oklab::StraightRgba;
 use crate::simd::memchr2;
-use crate::unicode::{self, Cursor, MeasurementConfig, Utf8Chars};
-use crate::{apperr, icu, simd};
+use crate::unicode::{self, Cursor, MeasurementConfig};
+use crate::{icu, simd};
 
 /// The margin template is used for line numbers.
 /// The max. line number we should ever expect is probably 64-bit,
@@ -58,6 +60,25 @@ const VISUAL_SPACE: &str = "･";
 const VISUAL_SPACE_PREFIX_ADD: usize = '･'.len_utf8() - 1;
 const VISUAL_TAB: &str = "￫       ";
 const VISUAL_TAB_PREFIX_ADD: usize = '￫'.len_utf8() - 1;
+
+pub enum IoError {
+    Io(io::Error),
+    Icu(icu::Error),
+}
+
+pub type IoResult<T> = std::result::Result<T, IoError>;
+
+impl From<io::Error> for IoError {
+    fn from(err: io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+impl From<icu::Error> for IoError {
+    fn from(err: icu::Error) -> Self {
+        Self::Icu(err)
+    }
+}
 
 /// Stores statistics about the whole document.
 #[derive(Copy, Clone)]
@@ -144,7 +165,7 @@ pub struct SearchOptions {
 
 enum RegexReplacement<'a> {
     Group(i32),
-    Text(Vec<u8, &'a Arena>),
+    Text(BVec<'a, u8>),
 }
 
 /// Caches the start and length of the active edit line for a single edit.
@@ -209,8 +230,8 @@ pub type RcTextBuffer = Rc<TextBufferCell>;
 pub struct TextBuffer {
     buffer: GapBuffer,
 
-    undo_stack: LinkedList<SemiRefCell<HistoryEntry>>,
-    redo_stack: LinkedList<SemiRefCell<HistoryEntry>>,
+    undo_stack: VecDeque<SemiRefCell<HistoryEntry>>,
+    redo_stack: VecDeque<SemiRefCell<HistoryEntry>>,
     last_history_type: HistoryType,
     last_save_generation: u32,
 
@@ -251,19 +272,19 @@ pub struct TextBuffer {
 impl TextBuffer {
     /// Creates a new text buffer inside an [`Rc`].
     /// See [`TextBuffer::new()`].
-    pub fn new_rc(small: bool) -> apperr::Result<RcTextBuffer> {
+    pub fn new_rc(small: bool) -> io::Result<RcTextBuffer> {
         let buffer = Self::new(small)?;
         Ok(Rc::new(SemiRefCell::new(buffer)))
     }
 
     /// Creates a new text buffer. With `small` you can control
     /// if the buffer is optimized for <1MiB contents.
-    pub fn new(small: bool) -> apperr::Result<Self> {
+    pub fn new(small: bool) -> io::Result<Self> {
         Ok(Self {
             buffer: GapBuffer::new(small)?,
 
-            undo_stack: LinkedList::new(),
-            redo_stack: LinkedList::new(),
+            undo_stack: Default::default(),
+            redo_stack: Default::default(),
             last_history_type: HistoryType::Other,
             last_save_generation: 0,
 
@@ -672,13 +693,9 @@ impl TextBuffer {
     }
 
     /// Reads a file from disk into the text buffer, detecting encoding and BOM.
-    pub fn read_file(
-        &mut self,
-        file: &mut File,
-        encoding: Option<&'static str>,
-    ) -> apperr::Result<()> {
+    pub fn read_file(&mut self, file: &mut File, encoding: Option<&'static str>) -> IoResult<()> {
         let scratch = scratch_arena(None);
-        let mut buf = scratch.alloc_uninit().transpose();
+        let buf = scratch.alloc_uninit_array();
         let mut first_chunk_len = 0;
         let mut read = 0;
 
@@ -704,9 +721,9 @@ impl TextBuffer {
 
         let done = read == 0;
         if self.encoding == "UTF-8" {
-            self.read_file_as_utf8(file, &mut buf, first_chunk_len, done)?;
+            self.read_file_as_utf8(file, buf, first_chunk_len, done)?;
         } else {
-            self.read_file_with_icu(file, &mut buf, first_chunk_len, done)?;
+            self.read_file_with_icu(file, buf, first_chunk_len, done)?;
         }
 
         // Figure out
@@ -825,7 +842,7 @@ impl TextBuffer {
         buf: &mut [MaybeUninit<u8>; 4 * KIBI],
         first_chunk_len: usize,
         done: bool,
-    ) -> apperr::Result<()> {
+    ) -> io::Result<()> {
         {
             let mut first_chunk = unsafe { buf[..first_chunk_len].assume_init_ref() };
             if first_chunk.starts_with(b"\xEF\xBB\xBF") {
@@ -879,7 +896,7 @@ impl TextBuffer {
         buf: &mut [MaybeUninit<u8>; 4 * KIBI],
         first_chunk_len: usize,
         mut done: bool,
-    ) -> apperr::Result<()> {
+    ) -> IoResult<()> {
         let scratch = scratch_arena(None);
         let pivot_buffer = scratch.alloc_uninit_slice(4 * KIBI);
         let mut c = icu::Converter::new(pivot_buffer, self.encoding, "UTF-8")?;
@@ -938,7 +955,7 @@ impl TextBuffer {
     }
 
     /// Writes the text buffer contents to a file, handling BOM and encoding.
-    pub fn write_file(&mut self, file: &mut File) -> apperr::Result<()> {
+    pub fn write_file(&mut self, file: &mut File) -> IoResult<()> {
         let mut offset = 0;
 
         if self.encoding.starts_with("UTF-8") {
@@ -961,7 +978,7 @@ impl TextBuffer {
         Ok(())
     }
 
-    fn write_file_with_icu(&mut self, file: &mut File) -> apperr::Result<()> {
+    fn write_file_with_icu(&mut self, file: &mut File) -> IoResult<()> {
         let scratch = scratch_arena(None);
         let pivot_buffer = scratch.alloc_uninit_slice(4 * KIBI);
         let buf = scratch.alloc_uninit_slice(4 * KIBI);
@@ -1087,7 +1104,7 @@ impl TextBuffer {
     }
 
     /// Find the next occurrence of the given `pattern` and select it.
-    pub fn find_and_select(&mut self, pattern: &str, options: SearchOptions) -> apperr::Result<()> {
+    pub fn find_and_select(&mut self, pattern: &str, options: SearchOptions) -> icu::Result<()> {
         if let Some(search) = &mut self.search {
             let search = search.get_mut();
             // When the search input changes we must reset the search.
@@ -1145,7 +1162,7 @@ impl TextBuffer {
         pattern: &str,
         options: SearchOptions,
         replacement: &[u8],
-    ) -> apperr::Result<()> {
+    ) -> icu::Result<()> {
         // Editors traditionally replace the previous search hit, not the next possible one.
         if let (Some(search), Some(..)) = (&self.search, &self.selection) {
             let search = unsafe { &mut *search.get() };
@@ -1168,7 +1185,7 @@ impl TextBuffer {
         pattern: &str,
         options: SearchOptions,
         replacement: &[u8],
-    ) -> apperr::Result<()> {
+    ) -> icu::Result<()> {
         let scratch = scratch_arena(None);
         let mut search = self.find_construct_search(pattern, options)?;
         let mut offset = 0;
@@ -1193,9 +1210,9 @@ impl TextBuffer {
         &self,
         pattern: &str,
         options: SearchOptions,
-    ) -> apperr::Result<ActiveSearch> {
+    ) -> icu::Result<ActiveSearch> {
         if pattern.is_empty() {
-            return Err(apperr::Error::Icu(1)); // U_ILLEGAL_ARGUMENT_ERROR
+            return Err(icu::ILLEGAL_ARGUMENT_ERROR);
         }
 
         let sanitized_pattern = if options.whole_word && options.use_regex {
@@ -1294,15 +1311,15 @@ impl TextBuffer {
         arena: &'a Arena,
         search: &mut ActiveSearch,
         replacement: &[u8],
-    ) -> Vec<RegexReplacement<'a>, &'a Arena> {
-        let mut res = Vec::new_in(arena);
+    ) -> BVec<'a, RegexReplacement<'a>> {
+        let mut res = BVec::empty();
 
         if !search.options.use_regex {
             return res;
         }
 
         let group_count = search.regex.group_count();
-        let mut text = Vec::new_in(arena);
+        let mut text = BVec::empty();
         let mut text_beg = 0;
 
         loop {
@@ -1310,7 +1327,7 @@ impl TextBuffer {
 
             // Push the raw, unescaped text, if any.
             if text_beg < off {
-                text.extend_from_slice(&replacement[text_beg..off]);
+                text.extend_from_slice(arena, &replacement[text_beg..off]);
             }
 
             // Unescape any escaped characters.
@@ -1324,12 +1341,15 @@ impl TextBuffer {
                 let ch = replacement.get(off - 1).map_or(b'\\', |&c| c);
 
                 // Unescape and append the character.
-                text.push(match ch {
-                    b'n' => b'\n',
-                    b'r' => b'\r',
-                    b't' => b'\t',
-                    ch => ch,
-                });
+                text.push(
+                    arena,
+                    match ch {
+                        b'n' => b'\n',
+                        b'r' => b'\r',
+                        b't' => b'\t',
+                        ch => ch,
+                    },
+                );
             }
 
             // Parse out a group number, if any.
@@ -1365,18 +1385,18 @@ impl TextBuffer {
                 if !acc_bad {
                     group = acc;
                 } else {
-                    text.extend_from_slice(&replacement[beg..end]);
+                    text.extend_from_slice(arena, &replacement[beg..end]);
                 }
 
                 off = end;
             }
 
             if !text.is_empty() {
-                res.push(RegexReplacement::Text(text));
-                text = Vec::new_in(arena);
+                res.push(arena, RegexReplacement::Text(text));
+                text = BVec::empty();
             }
             if group >= 0 {
-                res.push(RegexReplacement::Group(group));
+                res.push(arena, RegexReplacement::Group(group));
             }
 
             text_beg = off;
@@ -1721,13 +1741,11 @@ impl TextBuffer {
             return None;
         }
 
-        let scratch = scratch_arena(None);
         let width = destination.width();
         let height = destination.height();
         let line_number_width = self.margin_width.max(3) as usize - 3;
         let text_width = width - self.margin_width;
         let mut visualizer_buf = [0xE2, 0x90, 0x80]; // U+2400 in UTF8
-        let mut line = ArenaString::new_in(&scratch);
         let mut visual_pos_x_max = 0;
 
         // Pick the cursor closer to the `origin.y`.
@@ -1744,10 +1762,10 @@ impl TextBuffer {
             Some(TextBufferSelection { beg, end }) => minmax(beg, end),
         };
 
-        line.reserve(width as usize * 2);
-
         for y in 0..height {
-            line.clear();
+            let scratch = scratch_arena(None);
+            let mut line = BString::empty();
+            line.reserve(&*scratch, width as usize * 2);
 
             let visual_line = origin.y + y;
             let mut cursor_beg =
@@ -1770,14 +1788,21 @@ impl TextBuffer {
                     // because `line_number_width` can't possibly be larger than 19.
                     let off = 19 - line_number_width;
                     unsafe { std::hint::assert_unchecked(off < MARGIN_TEMPLATE.len()) };
-                    line.push_str(&MARGIN_TEMPLATE[off..]);
+                    line.push_str(&*scratch, &MARGIN_TEMPLATE[off..]);
                 } else if self.word_wrap_column <= 0 || cursor_beg.logical_pos.x == 0 {
                     // Regular line? Place "123 | " in the margin.
-                    _ = write!(line, "{:1$} │ ", cursor_beg.logical_pos.y + 1, line_number_width);
+                    arena_write_fmt!(
+                        &*scratch,
+                        line,
+                        "{:1$} │ ",
+                        cursor_beg.logical_pos.y + 1,
+                        line_number_width
+                    );
                 } else {
                     // Wrapped line? Place " ... | " in the margin.
                     let number_width = (cursor_beg.logical_pos.y + 1).ilog10() as usize + 1;
-                    _ = write!(
+                    arena_write_fmt!(
+                        &*scratch,
                         line,
                         "{0:1$}{0:∙<2$} │ ",
                         "",
@@ -1868,7 +1893,7 @@ impl TextBuffer {
                     if cursor_next.visual_pos.x > origin.x {
                         let overlap = cursor_next.visual_pos.x - origin.x;
                         debug_assert!((1..=7).contains(&overlap));
-                        line.push_str(&TAB_WHITESPACE[..overlap as usize]);
+                        line.push_str(&*scratch, &TAB_WHITESPACE[..overlap as usize]);
                         cursor_beg = cursor_next;
                     }
                 }
@@ -1931,7 +1956,7 @@ impl TextBuffer {
                                 );
                             }
 
-                            line.push_str(&whitespace[..prefix_add + tab_size as usize]);
+                            line.push_str(&*scratch, &whitespace[..prefix_add + tab_size as usize]);
                         } else if ch <= '\x1f' || ('\u{7f}'..='\u{9f}').contains(&ch) {
                             // Append a Unicode representation of the C0 or C1 control character.
                             visualizer_buf[2] = if ch <= '\x1f' {
@@ -1943,7 +1968,9 @@ impl TextBuffer {
                             };
 
                             // Our manually constructed UTF8 is never going to be invalid. Trust.
-                            line.push_str(unsafe { str::from_utf8_unchecked(&visualizer_buf) });
+                            line.push_str(&*scratch, unsafe {
+                                str::from_utf8_unchecked(&visualizer_buf)
+                            });
 
                             // Highlight the control character yellow.
                             cursor_line =
@@ -1960,7 +1987,7 @@ impl TextBuffer {
                             fb.blend_bg(visualizer_rect, bg);
                             fb.blend_fg(visualizer_rect, fg);
                         } else {
-                            line.push(ch);
+                            line.push(&*scratch, ch);
                         }
                     }
 
@@ -2116,7 +2143,7 @@ impl TextBuffer {
 
         let mut offset = 0;
         let scratch = scratch_arena(None);
-        let mut newline_buffer = ArenaString::new_in(&scratch);
+        let mut newline_buffer = BString::empty();
 
         loop {
             // Can't use `unicode::newlines_forward` because bracketed paste uses CR instead of LF/CRLF.
@@ -2163,7 +2190,7 @@ impl TextBuffer {
 
             // First, write the newline.
             newline_buffer.clear();
-            newline_buffer.push_str(if self.newlines_are_crlf { "\r\n" } else { "\n" });
+            newline_buffer.push_str(&*scratch, if self.newlines_are_crlf { "\r\n" } else { "\n" });
 
             if !raw {
                 // We'll give the next line the same indentation as the previous one.
@@ -2196,13 +2223,13 @@ impl TextBuffer {
                 // If tabs are enabled, add as many tabs as we can.
                 if self.indent_with_tabs {
                     let tab_count = newline_indentation / self.tab_size;
-                    newline_buffer.push_repeat('\t', tab_count as usize);
+                    newline_buffer.push_repeat(&*scratch, '\t', tab_count as usize);
                     newline_indentation -= tab_count * self.tab_size;
                 }
 
                 // If tabs are disabled, or if the indentation wasn't a multiple of the tab size,
                 // add spaces to make up the difference.
-                newline_buffer.push_repeat(' ', newline_indentation as usize);
+                newline_buffer.push_repeat(&*scratch, ' ', newline_indentation as usize);
             }
 
             self.edit_write(newline_buffer.as_bytes());
@@ -2724,6 +2751,7 @@ impl TextBuffer {
     fn undo_redo(&mut self, undo: bool) {
         let buffer_generation = self.buffer.generation();
         let mut entry_buffer_generation = None;
+        let mut damage_start = CoordType::MAX;
 
         loop {
             // Transfer the last entry from the undo stack to the redo stack or vice versa.
@@ -2734,17 +2762,14 @@ impl TextBuffer {
                     (&mut self.redo_stack, &mut self.undo_stack)
                 };
 
-                if let Some(g) = entry_buffer_generation
-                    && from.back().is_none_or(|c| c.borrow().generation_before != g)
-                {
-                    break;
-                }
-
-                let Some(list) = from.cursor_back_mut().remove_current_as_list() else {
+                // Only pop the entry if its buffer generation matches the previous one
+                let Some(g) = from.pop_back_if(|c| {
+                    entry_buffer_generation.is_none_or(|g| g == c.borrow().generation_before)
+                }) else {
                     break;
                 };
 
-                to.cursor_back_mut().splice_after(list);
+                to.push_back(g);
             }
 
             let change = {
@@ -2767,6 +2792,8 @@ impl TextBuffer {
             } else {
                 cursor
             };
+
+            damage_start = damage_start.min(cursor.logical_pos.y);
 
             {
                 let mut change = change.borrow_mut();
@@ -2835,6 +2862,11 @@ impl TextBuffer {
                     self.last_history_type = HistoryType::Other;
                 }
             }
+        }
+
+        if damage_start == CoordType::MAX {
+            // There weren't any undo/redo entries.
+            return;
         }
 
         if entry_buffer_generation.is_some() {

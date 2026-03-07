@@ -40,14 +40,11 @@ features = [
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
-    "Win32_System_Diagnostics_Debug",
     "Win32_System_IO",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
 ]
 
 [dev-dependencies]
-criterion = { version = "0.7", features = ["html_reports"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
+criterion = { version = "0.8", features = ["html_reports"] }
 zstd = { version = "0.13", default-features = false }

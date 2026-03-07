@@ -1,15 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::LinkedList;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use edit::buffer::{RcTextBuffer, TextBuffer};
 use edit::helpers::{CoordType, Point};
-use edit::{apperr, path, sys};
+use edit::{path, sys};
 
+use crate::apperr;
 use crate::state::DisplayablePathBuf;
 
 pub struct Document {
@@ -75,7 +76,7 @@ impl Document {
 
 #[derive(Default)]
 pub struct DocumentManager {
-    pub list: LinkedList<Document>,
+    list: Vec<Document>,
 }
 
 impl DocumentManager {
@@ -86,30 +87,48 @@ impl DocumentManager {
 
     #[inline]
     pub fn active(&self) -> Option<&Document> {
-        self.list.front()
+        self.list.last()
     }
 
     #[inline]
     pub fn active_mut(&mut self) -> Option<&mut Document> {
-        self.list.front_mut()
+        self.list.last_mut()
     }
 
-    #[inline]
     pub fn update_active<F: FnMut(&Document) -> bool>(&mut self, mut func: F) -> bool {
-        let mut cursor = self.list.cursor_front_mut();
-        while let Some(doc) = cursor.current() {
-            if func(doc) {
-                let list = cursor.remove_current_as_list().unwrap();
-                self.list.cursor_front_mut().splice_before(list);
-                return true;
-            }
-            cursor.move_next();
+        let Some(idx) = self.list.iter().rposition(&mut func) else {
+            return false;
+        };
+
+        // Already active (= last) document matched? Nothing to do.
+        if idx == self.list.len() - 1 {
+            return false;
         }
-        false
+
+        // Otherwise, move the matched document to the end of the list so it becomes active.
+        // Uses unsafe, because `rotate_left()` is horrendously bad with -Copt-level=s
+        // (it's really almost comical) and I just don't tolerate that.
+        // If I'm dead and you're looking to rewrite this use `list.push(list.remove(idx))`.
+        unsafe {
+            let beg = self.list.as_mut_ptr();
+            let doc = beg.add(idx);
+            let last = beg.add(self.list.len() - 1);
+            let amount = self.list.len() - idx - 1;
+            let mut temp = std::mem::MaybeUninit::<Document>::uninit();
+
+            // Make a backup of the document
+            std::ptr::copy_nonoverlapping(doc, temp.as_mut_ptr(), 1);
+            // Shift the rest to the front
+            std::ptr::copy(doc.add(1), doc, amount);
+            // Move the backup to the end
+            std::ptr::copy_nonoverlapping(temp.as_ptr(), last, 1);
+        }
+
+        true
     }
 
     pub fn remove_active(&mut self) {
-        self.list.pop_front();
+        self.list.pop();
     }
 
     pub fn add_untitled(&mut self) -> apperr::Result<&mut Document> {
@@ -124,8 +143,9 @@ impl DocumentManager {
         };
         self.gen_untitled_name(&mut doc);
 
-        self.list.push_front(doc);
-        Ok(self.list.front_mut().unwrap())
+        // In the future this could use push_mut, but it's unstable right now. As usual.
+        self.list.push(doc);
+        Ok(self.list.last_mut().unwrap())
     }
 
     pub fn gen_untitled_name(&self, doc: &mut Document) {
@@ -143,10 +163,10 @@ impl DocumentManager {
         let (path, goto) = Self::parse_filename_goto(path);
         let path = path::normalize(path);
 
-        let mut file = match Self::open_for_reading(&path) {
+        let mut file = match File::open(&path) {
             Ok(file) => Some(file),
-            Err(err) if sys::apperr_is_not_found(err) => None,
-            Err(err) => return Err(err),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err.into()),
         };
 
         let file_id = if file.is_some() { Some(sys::file_id(file.as_ref(), &path)?) } else { None };
@@ -194,8 +214,8 @@ impl DocumentManager {
             self.remove_active();
         }
 
-        self.list.push_front(doc);
-        Ok(self.list.front_mut().unwrap())
+        self.list.push(doc);
+        Ok(self.list.last_mut().unwrap())
     }
 
     pub fn reflow_all(&self) {
@@ -210,6 +230,16 @@ impl DocumentManager {
     }
 
     pub fn open_for_writing(path: &Path) -> apperr::Result<File> {
+        // Error handling for directory creation and file writing
+
+        // It is worth doing an existence check because it is significantly
+        // faster than calling mkdir() and letting it fail (at least on Windows).
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
+        }
+
         File::create(path).map_err(apperr::Error::from)
     }
 
